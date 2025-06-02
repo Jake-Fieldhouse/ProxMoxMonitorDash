@@ -18,6 +18,10 @@ LN_DB_PASS="${LN_DB_PASS:-librenmspass}"
 LN_USER="${LN_USER:-librenms}"
 LN_PASS="${LN_PASS:-jkeAdmin@123}"
 SNMP_COMM="${SNMP_COMM:-public}"
+TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-local}"  # Default storage for LXC templates (overridable via env)
+if [[ $# -gt 0 ]]; then
+  TEMPLATE_STORAGE="$1"  # If storage is provided as first argument, override the default
+fi
 
 SNMPD_ID=900
 FW_ID=901
@@ -83,13 +87,27 @@ done
 
 # -------------------- Ensure Debian 12 LXC Template --------------------
 say "Ensuring Debian 12 template"
-TPL="local:vztmpl/debian-12-standard_12.0-1_amd64.tar.zst"
-if ! pveam available | grep -q "debian-12"; then
-  pveam update
-fi
-if ! pveam list | grep -q "debian-12"; then
-  echo "Template debian-12 not found. Exiting."
-  exit 1
+TEMPLATE_FILE="debian-12-standard_12.0-1_amd64.tar.zst"  # Debian 12 LXC template file name
+TPL="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_FILE}"  # Template path with specified storage
+if ! pveam list "$TEMPLATE_STORAGE" | grep -F -q "$TEMPLATE_FILE"; then  # Use specified storage for template list
+  say "Template $TEMPLATE_FILE not found on storage $TEMPLATE_STORAGE."  # Clearer logging for missing template
+  # Ensure template is available and attempt to download it
+  if ! pveam available | grep -F -q "$TEMPLATE_FILE"; then
+    say "Updating available template list..."
+    if ! pveam update; then
+      echo "Failed to update template list from Proxmox. Exiting."
+      exit 1
+    fi
+  fi
+  if ! pveam available | grep -F -q "$TEMPLATE_FILE"; then
+    echo "Template $TEMPLATE_FILE not found in remote repository. Exiting."
+    exit 1
+  fi
+  say "Downloading template $TEMPLATE_FILE to storage $TEMPLATE_STORAGE..."
+  if ! pveam download "$TEMPLATE_STORAGE" "$TEMPLATE_FILE"; then
+    echo "Failed to download template $TEMPLATE_FILE to $TEMPLATE_STORAGE. Exiting."
+    exit 1
+  fi
 fi
 
 # -------------------- Container Creation --------------------
@@ -151,7 +169,7 @@ pct exec "$FW_ID" -- bash -lc "
   # Allow HTTP from outside
   iptables -A INPUT -p tcp --dport 80 -j ACCEPT
   # Allow LibreNMS to query SNMP container
-  iptables -A INPUT -p udp -s $SNMPD_IP --dport 161 -j ACCEPT
+  iptables -A INPUT -p udp -s $SNMPD_ID --dport 161 -j ACCEPT
   # Allow Proxmox host access
   iptables -A INPUT -s $(hostname -I | awk '{print \$1}') -j ACCEPT
   # Drop others
@@ -168,8 +186,7 @@ pct exec "$ADG_ID" -- bash -lc "
   # Install jq
   apt-get install -y jq
   # Fetch latest release URL
-  URL=\"\$(curl -sSL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest \
-    | jq -r '.assets[] | select(.name|test(\"Linux_amd64\")) | .browser_download_url')\"
+  URL=\"\$(curl -sSL https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest | jq -r '.assets[] | select(.name|test(\\\"Linux_amd64\\\")) | .browser_download_url')\"
   cd /opt
   for i in {1..3}; do
     curl -sSL \"\$URL\" -o AdGuardHome.tar.gz && break || sleep 2
@@ -179,8 +196,8 @@ pct exec "$ADG_ID" -- bash -lc "
   mkdir -p /etc/AdGuardHome
   cp /usr/local/bin/AdGuardHome/AdGuardHome.yaml /etc/AdGuardHome/
   # Configure admin credentials & DNS upstream
-  yq eval \".dns.upstreamServers = [\\\"8.8.8.8\\\", \\\"8.8.4.4\\\"]\" -i /etc/AdGuardHome/AdGuardHome.yaml
-  yq eval \".users = [{name: \\\"$AGH_USER\\\", password: \\\"$AGH_PASS\\\", is_admin: true}]\" -i /etc/AdGuardHome/AdGuardHome.yaml
+  yq eval \".dns.upstreamServers = ['8.8.8.8', '8.8.4.4']\" -i /etc/AdGuardHome/AdGuardHome.yaml
+  yq eval \".users = [{name: '$AGH_USER', password: '$AGH_PASS', is_admin: true}]\" -i /etc/AdGuardHome/AdGuardHome.yaml
   # Create systemd service
   cat > /etc/systemd/system/AdGuardHome.service <<'EOF'
 [Unit]
@@ -250,7 +267,7 @@ pct exec "$LN_ID" -- bash -lc "
 <VirtualHost *:80>
   ServerName $DNS_SUBDOMAIN
   DocumentRoot /opt/librenms/html
-  <Directory "/opt/librenms/html">
+  <Directory \"/opt/librenms/html\">
     AllowOverride All
     Require all granted
   </Directory>
