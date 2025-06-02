@@ -86,22 +86,30 @@ for id in "$SNMPD_ID" "$FW_ID" "$ADG_ID" "$LN_ID"; do
 done
 
 # -------------------- Ensure Debian 12 LXC Template --------------------
-say "Ensuring Debian 12 template"
+say "Ensuring latest available Debian 12 template from Proxmox"
+
+# Fetch latest available Debian 12 template
 LATEST_TEMPLATE=$(pveam available | awk '{print $2}' | grep -E '^debian-12.*amd64\.tar\.zst$' | sort -V | tail -n1)
 
 if [[ -z "$LATEST_TEMPLATE" ]]; then
-  say "No Debian 12 template found in remote repo. Attempting to update template list..."
+  say "No Debian 12 template found in current list. Updating..."
   pveam update
   LATEST_TEMPLATE=$(pveam available | awk '{print $2}' | grep -E '^debian-12.*amd64\.tar\.zst$' | sort -V | tail -n1)
   if [[ -z "$LATEST_TEMPLATE" ]]; then
-    echo "Template for Debian 12 not found even after update. Exiting."
+    echo "❌ Could not find any Debian 12 template after update. Exiting."
     exit 1
   fi
 fi
 
-if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$LATEST_TEMPLATE"; then
-  say "Downloading $LATEST_TEMPLATE to $TEMPLATE_STORAGE"
-  pveam download "$TEMPLATE_STORAGE" "$LATEST_TEMPLATE"
+# Check if already downloaded
+if ! pveam list "$TEMPLATE_STORAGE" | grep -Fq "$LATEST_TEMPLATE"; then
+  say "Downloading $LATEST_TEMPLATE to storage $TEMPLATE_STORAGE"
+  if ! pveam download "$TEMPLATE_STORAGE" "$LATEST_TEMPLATE"; then
+    echo "❌ Failed to download $LATEST_TEMPLATE. Exiting."
+    exit 1
+  fi
+else
+  say "$LATEST_TEMPLATE already available on $TEMPLATE_STORAGE"
 fi
 
 TPL="${TEMPLATE_STORAGE}:vztmpl/${LATEST_TEMPLATE}"
