@@ -87,28 +87,25 @@ done
 
 # -------------------- Ensure Debian 12 LXC Template --------------------
 say "Ensuring Debian 12 template"
-TEMPLATE_FILE="debian-12-standard_12.0-1_amd64.tar.zst"  # Debian 12 LXC template file name
-TPL="${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE_FILE}"  # Template path with specified storage
-if ! pveam list "$TEMPLATE_STORAGE" | grep -F -q "$TEMPLATE_FILE"; then  # Use specified storage for template list
-  say "Template $TEMPLATE_FILE not found on storage $TEMPLATE_STORAGE."  # Clearer logging for missing template
-  # Ensure template is available and attempt to download it
-  if ! pveam available | grep -F -q "$TEMPLATE_FILE"; then
-    say "Updating available template list..."
-    if ! pveam update; then
-      echo "Failed to update template list from Proxmox. Exiting."
-      exit 1
-    fi
-  fi
-  if ! pveam available | grep -F -q "$TEMPLATE_FILE"; then
-    echo "Template $TEMPLATE_FILE not found in remote repository. Exiting."
-    exit 1
-  fi
-  say "Downloading template $TEMPLATE_FILE to storage $TEMPLATE_STORAGE..."
-  if ! pveam download "$TEMPLATE_STORAGE" "$TEMPLATE_FILE"; then
-    echo "Failed to download template $TEMPLATE_FILE to $TEMPLATE_STORAGE. Exiting."
+LATEST_TEMPLATE=$(pveam available | awk '{print $2}' | grep -E '^debian-12.*amd64\.tar\.zst$' | sort -V | tail -n1)
+
+if [[ -z "$LATEST_TEMPLATE" ]]; then
+  say "No Debian 12 template found in remote repo. Attempting to update template list..."
+  pveam update
+  LATEST_TEMPLATE=$(pveam available | awk '{print $2}' | grep -E '^debian-12.*amd64\.tar\.zst$' | sort -V | tail -n1)
+  if [[ -z "$LATEST_TEMPLATE" ]]; then
+    echo "Template for Debian 12 not found even after update. Exiting."
     exit 1
   fi
 fi
+
+if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$LATEST_TEMPLATE"; then
+  say "Downloading $LATEST_TEMPLATE to $TEMPLATE_STORAGE"
+  pveam download "$TEMPLATE_STORAGE" "$LATEST_TEMPLATE"
+fi
+
+TPL="${TEMPLATE_STORAGE}:vztmpl/${LATEST_TEMPLATE}"
+
 
 # -------------------- Container Creation --------------------
 # All CTs share basic config
