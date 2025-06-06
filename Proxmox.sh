@@ -326,7 +326,7 @@ def get_guest_ips():
         except Exception:
             # Fallback: parse /config (DHCP lease) or skip
             conf = get_proxmox(f"nodes/{NODE}/lxc/{vmid}/config")
-            net0 = conf.get("net0", "")
+            net0 = conf.get("data", {}).get("net0", "")
             if "ip=" in net0:
                 ip = net0.split("ip=")[1].split("/")[0]
                 records[name] = ip
