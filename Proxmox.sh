@@ -29,6 +29,21 @@ for cmd in bash curl jq hexdump ip pveam pvesm pct qm systemctl tailscale; do
   fi
 done
 
+# Additional prerequisites: python3 and python3-requests
+if ! command -v python3 &>/dev/null; then
+  log "Installing missing tool: python3"
+  apt-get update -qq
+  apt-get install -qq -y python3 || error "Failed to install python3"
+fi
+if ! python3 - <<'EOF' >/dev/null 2>&1
+import requests
+EOF
+then
+  log "Installing missing library: python3-requests"
+  apt-get update -qq
+  apt-get install -qq -y python3-requests || error "Failed to install python3-requests"
+fi
+
 # ----------------------------------------------------------------------------
 # 1. Auto-detect LAN details
 # ----------------------------------------------------------------------------
@@ -100,18 +115,26 @@ log "Detected bridge=$BRIDGE, node_ip=$node_ip, gw=$GW_IP, adguard_ip=$ADG_IP, v
 # ----------------------------------------------------------------------------
 CONF_FILE=/etc/hosted-dns.conf
 
-# Default zone & cluster alias
-ZONE="jke.hosted"
-CLUSTER_NAME="jke.hosted"
+# Load zone/cluster/API key from config if present
+if [ -f "$CONF_FILE" ]; then
+  ZONE_FILE=$(awk -F= '/^zone[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+  CLUSTER_FILE=$(awk -F= '/^cluster_name[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+  KEY_FILE=$(awk -F= '/^api_key[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+  SECRET=$(awk -F= '/^api_token_secret[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+fi
 
-# Tailscale API key (hard-coded from user input)
-TS_API_KEY="tskey-api-kJf2PVPrQa11CNTRL-AxTK8E12aaFMqhQCEuzHbFPpMsuvL3r7Q"
+# Allow environment variables to override config values
+ZONE=${ZONE:-$ZONE_FILE}
+CLUSTER_NAME=${CLUSTER_NAME:-$CLUSTER_FILE}
+TS_API_KEY=${TS_API_KEY:-$KEY_FILE}
 
-# If our config file exists and has a token secret, re-use it
-if grep -q '^api_token_secret=' "$CONF_FILE" 2>/dev/null; then
-  source "$CONF_FILE"
-else
-  # Create PVE API token root@pam!dnssync if missing
+# Defaults if still unset
+ZONE=${ZONE:-jke.hosted}
+CLUSTER_NAME=${CLUSTER_NAME:-jke.hosted}
+: ${TS_API_KEY:?TS_API_KEY must be set via env or $CONF_FILE}
+
+# Create PVE API token if no secret was loaded
+if [ -z "${SECRET:-}" ]; then
   if ! pveum user token info root@pam dnssync &>/dev/null; then
     SECRET=$(pveum user token add root@pam dnssync --comment "DNS-sync for jke.hosted" | awk '/secret/ {print $2}')
   else
@@ -279,8 +302,7 @@ TS_API_KEY = config["tailscale"]["api_key"]
 TAILNET = config["tailscale"]["tailnet"]
 TS_API_BASE = f"https://api.tailscale.com/api/v2/tailnet/{TAILNET}/dns/names"
 
-HEADERS_TS = {"Authorization": f"Basic {TS_API_KEY.encode('ascii').hex()}"}
-# However, Tailscale expects HTTP Basic with base64: we do this:
+# Tailscale expects HTTP Basic with base64
 import base64
 HEADERS_TS = {
     "Authorization": "Basic " + base64.b64encode(f"{TS_API_KEY}:".encode()).decode()
@@ -326,6 +348,27 @@ def get_guest_ips():
         except Exception:
             # Fallback: parse /config (DHCP lease) or skip
             conf = get_proxmox(f"nodes/{NODE}/lxc/{vmid}/config")
+            net0 = conf.get("data", {}).get("net0", "")
+            if "ip=" in net0:
+                ip = net0.split("ip=")[1].split("/")[0]
+                records[name] = ip
+
+    # QEMU guests: /nodes/<node>/qemu
+    qemu_list = get_proxmox(f"nodes/{NODE}/qemu")
+    for item in qemu_list.get("data", []):
+        vmid = item.get("vmid")
+        name = item.get("name")
+        if item.get("status") != "running":
+            continue
+        try:
+            iface = get_proxmox(f"nodes/{NODE}/qemu/{vmid}/agent/network-get-interfaces")
+            for entry in iface.get("result", []):
+                if "ip-addresses" in entry and entry["ip-addresses"]:
+                    ip = entry["ip-addresses"][0]["ip-address"]
+                    records[name] = ip
+                    break
+        except Exception:
+            conf = get_proxmox(f"nodes/{NODE}/qemu/{vmid}/config")
             net0 = conf.get("data", {}).get("net0", "")
             if "ip=" in net0:
                 ip = net0.split("ip=")[1].split("/")[0]
