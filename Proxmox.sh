@@ -337,6 +337,27 @@ def get_guest_ips():
             if "ip=" in net0:
                 ip = net0.split("ip=")[1].split("/")[0]
                 records[name] = ip
+
+    # QEMU guests: /nodes/<node>/qemu
+    qemu_list = get_proxmox(f"nodes/{NODE}/qemu")
+    for item in qemu_list.get("data", []):
+        vmid = item.get("vmid")
+        name = item.get("name")
+        if item.get("status") != "running":
+            continue
+        try:
+            iface = get_proxmox(f"nodes/{NODE}/qemu/{vmid}/agent/network-get-interfaces")
+            for entry in iface.get("result", []):
+                if "ip-addresses" in entry and entry["ip-addresses"]:
+                    ip = entry["ip-addresses"][0]["ip-address"]
+                    records[name] = ip
+                    break
+        except Exception:
+            conf = get_proxmox(f"nodes/{NODE}/qemu/{vmid}/config")
+            net0 = conf.get("data", {}).get("net0", "")
+            if "ip=" in net0:
+                ip = net0.split("ip=")[1].split("/")[0]
+                records[name] = ip
     return records
 
 def fetch_ag_rewrites():
