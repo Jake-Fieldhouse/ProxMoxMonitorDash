@@ -29,6 +29,21 @@ for cmd in bash curl jq hexdump ip pveam pvesm pct qm systemctl tailscale; do
   fi
 done
 
+# Additional prerequisites: python3 and python3-requests
+if ! command -v python3 &>/dev/null; then
+  log "Installing missing tool: python3"
+  apt-get update -qq
+  apt-get install -qq -y python3 || error "Failed to install python3"
+fi
+if ! python3 - <<'EOF' >/dev/null 2>&1
+import requests
+EOF
+then
+  log "Installing missing library: python3-requests"
+  apt-get update -qq
+  apt-get install -qq -y python3-requests || error "Failed to install python3-requests"
+fi
+
 # ----------------------------------------------------------------------------
 # 1. Auto-detect LAN details
 # ----------------------------------------------------------------------------
