@@ -279,8 +279,7 @@ TS_API_KEY = config["tailscale"]["api_key"]
 TAILNET = config["tailscale"]["tailnet"]
 TS_API_BASE = f"https://api.tailscale.com/api/v2/tailnet/{TAILNET}/dns/names"
 
-HEADERS_TS = {"Authorization": f"Basic {TS_API_KEY.encode('ascii').hex()}"}
-# However, Tailscale expects HTTP Basic with base64: we do this:
+# Tailscale expects HTTP Basic with base64
 import base64
 HEADERS_TS = {
     "Authorization": "Basic " + base64.b64encode(f"{TS_API_KEY}:".encode()).decode()
