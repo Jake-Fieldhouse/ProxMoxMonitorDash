@@ -100,18 +100,26 @@ log "Detected bridge=$BRIDGE, node_ip=$node_ip, gw=$GW_IP, adguard_ip=$ADG_IP, v
 # ----------------------------------------------------------------------------
 CONF_FILE=/etc/hosted-dns.conf
 
-# Default zone & cluster alias
-ZONE="jke.hosted"
-CLUSTER_NAME="jke.hosted"
+# Load zone/cluster/API key from config if present
+if [ -f "$CONF_FILE" ]; then
+  ZONE_FILE=$(awk -F= '/^zone[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+  CLUSTER_FILE=$(awk -F= '/^cluster_name[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+  KEY_FILE=$(awk -F= '/^api_key[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+  SECRET=$(awk -F= '/^api_token_secret[[:space:]]*=/{gsub(/^[ \t]+|[ \t]+$/, "", $2);print $2}' "$CONF_FILE")
+fi
 
-# Tailscale API key (hard-coded from user input)
-TS_API_KEY="tskey-api-kJf2PVPrQa11CNTRL-AxTK8E12aaFMqhQCEuzHbFPpMsuvL3r7Q"
+# Allow environment variables to override config values
+ZONE=${ZONE:-$ZONE_FILE}
+CLUSTER_NAME=${CLUSTER_NAME:-$CLUSTER_FILE}
+TS_API_KEY=${TS_API_KEY:-$KEY_FILE}
 
-# If our config file exists and has a token secret, re-use it
-if grep -q '^api_token_secret=' "$CONF_FILE" 2>/dev/null; then
-  source "$CONF_FILE"
-else
-  # Create PVE API token root@pam!dnssync if missing
+# Defaults if still unset
+ZONE=${ZONE:-jke.hosted}
+CLUSTER_NAME=${CLUSTER_NAME:-jke.hosted}
+: ${TS_API_KEY:?TS_API_KEY must be set via env or $CONF_FILE}
+
+# Create PVE API token if no secret was loaded
+if [ -z "${SECRET:-}" ]; then
   if ! pveum user token info root@pam dnssync &>/dev/null; then
     SECRET=$(pveum user token add root@pam dnssync --comment "DNS-sync for jke.hosted" | awk '/secret/ {print $2}')
   else
