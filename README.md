@@ -1,6 +1,6 @@
 # ProxMoxMonitorDash
 
-This repository provides `Proxmox.sh`, a zero-input bootstrap script for a single-node Proxmox VE installation. It creates an AdGuard Home LXC container, configures DNS syncing and publishes DNS records for each guest to both AdGuard Home and Tailscale MagicDNS.
+This repository provides `Proxmox.sh`, a zero-input bootstrap script for a single-node Proxmox VE installation. It targets Proxmox VE 8.4 or newer and assumes `tailscale` is already configured. The script creates an AdGuard Home LXC container, configures DNS syncing and publishes DNS records for each guest to both AdGuard Home and Tailscale MagicDNS.
 
 ## Purpose
 - Detect LAN settings and prepare an AdGuard Home container.
@@ -26,13 +26,14 @@ ZONE="example.com"
 You can also change `CLUSTER_NAME` if you want a different alias for the host. Save the file after editing.
 
 ## Running the script
-Execute the script as root:
+1. Edit `ZONE` (and optionally `CLUSTER_NAME`) near the top of `Proxmox.sh`.
+2. Run the script as root:
 
 ```bash
 sudo bash Proxmox.sh
 ```
 
-It is safe to run multiple times since the operations are idempotent.
+3. Wait about a minute for the initial DNS sync. The script is idempotent so you can rerun it any time.
 
 ## Example DNS records
 With `ZONE` set to `example.com` and a container named `adguard`, the helper will publish A records similar to:
